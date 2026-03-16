@@ -92,7 +92,6 @@ class NicknameGenerator
     nickname
   end
 
-  # Генерация ника в геймерском стиле: leet + префиксы/суффиксы + обёртка
   def generate_gamer(name = nil, options = {})
     if name.nil? || name.empty?
       base = generate_random(options.merge(number: false))
@@ -133,3 +132,39 @@ class NicknameGenerator
 
     nickname
   end
+  private
+
+  def random_adjective
+    Faker::Adjective.positive
+  rescue
+    %w[awesome brilliant creative dynamic epic fantastic great happy innovative jolly
+       kind lively magical nice optimistic peaceful quick strong unique vibrant witty
+       xenial young zealous].sample
+  end
+
+  def random_noun
+    categories = [
+      -> { Faker::Creature::Animal.name },
+      -> { Faker::Color.color_name },
+      -> { Faker::Food.dish },
+      -> { Faker::Games::Pokemon.name },
+      -> { Faker::Name.first_name }
+    ]
+    categories.sample.call
+  rescue
+    %w[tiger lion panda eagle shark wolf phoenix dragon unicorn thunder shadow blaze
+       storm frost ember].sample
+  end
+
+  def random_prefix
+    PREFIXES.sample
+  end
+
+  def random_suffix
+    SUFFIXES.sample
+  end
+
+  def leet_transform(text)
+    text.chars.map { |c| LEET_MAP[c] || c }.join
+  end
+end

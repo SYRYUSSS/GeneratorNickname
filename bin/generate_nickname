@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/nickname_generator'
+require 'optparse'
+
+generator = NicknameGenerator.instance
+
+options = {}
+opt_parser = OptionParser.new do |opts|
+  opts.banner = "Usage: generate_nickname [options]"
+
+  opts.on("--type TYPE", [:random, :from_name, :gamer], "Type: random, from_name, gamer") do |t|
+    options[:type] = t
+  end
+
+  opts.on("--name NAME", "Base name for from_name/gamer") do |n|
+    options[:name] = n
+  end
+
+  opts.on("--[no-]prefix", "Include prefix (default true)") do |p|
+    options[:prefix] = p
+  end
+
+  opts.on("--[no-]suffix", "Include suffix") do |s|
+    options[:suffix] = s
+  end
+
+  opts.on("--[no-]leet", "Apply leet (for gamer)") do |l|
+    options[:leet] = l
+  end
+
+  opts.on("--[no-]number", "Include number") do |n|
+    options[:number] = n
+  end
+
+  opts.on("--separator SEP", "Separator (default '_')") do |sep|
+    options[:separator] = sep
+  end
+
+  opts.on("--wrap-x", "Wrap with xX _ Xx (gamer style)") do
+    options[:wrap_with_x] = true
+  end
+
+  opts.on("-h", "--help", "Prints help") do
+    puts opts
+    exit
+  end
+end
+
+opt_parser.parse!
+
+puts generator.generate(options)
