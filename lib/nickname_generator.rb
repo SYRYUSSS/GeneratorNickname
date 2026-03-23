@@ -1,10 +1,7 @@
-require 'singleton'
 require 'faker'
 
-class NicknameGenerator
-  include Singleton
-
-  # Списки префиксов и суффиксов
+# Базовый класс стратегии, содержащий общие константы и вспомогательные методы
+class GenerationStrategy
   PREFIXES = [
     'xX', 'Mr', 'Mrs', 'Dr', 'Lord', 'Lady', 'Sir', 'King', 'Queen',
     'Pro', 'Ultra', 'Super', 'Mega', 'Hyper', 'Dark', 'Shadow', 'Night',
@@ -22,138 +19,18 @@ class NicknameGenerator
     'A' => '4', 'E' => '3', 'I' => '1', 'O' => '0', 'S' => '5', 'T' => '7'
   }.freeze
 
-  # Основной метод генерации с выбором типа
-  # options:
-  #   :type       - :random, :from_name, :gamer (по умолчанию :random)
-  #   :name       - исходное имя (для :from_name и :gamer)
-  #   :prefix     - boolean (добавлять префикс, по умолчанию true для соответствующих типов)
-  #   :suffix     - boolean (добавлять суффикс, по умолчанию true)
-  #   :leet       - boolean (применять leet, для :gamer по умолчанию true)
-  #   :wrap_with_x- boolean (обернуть в xX _ Xx, для :gamer)
-  #   :separator  - разделитель (по умолчанию '_')
-  #   :number     - добавлять число (по умолчанию: для :random true, для остальных false)
-  #   :number_range - диапазон числа (по умолчанию 1..999)
-  def generate(options = {})
-    type = options[:type] || :random
-    case type
-    when :random
-      generate_random(options)
-    when :from_name
-      generate_from_name(options[:name], options)
-    when :gamer
-      generate_gamer(options[:name], options)
-    else
-      raise ArgumentError, "Unknown type: #{type}"
-    end
+  def generate(options)
+    raise NotImplementedError, "Метод generate должен быть реализован в подклассе"
   end
 
-  # Генерация случайного ника (прилагательное + существительное + опционально число)
-  def generate_random(options = {})
-    separator = options[:separator] || '_'
-    add_number = options[:number].nil? ? true : options[:number]
-    number_range = options[:number_range] || 1..999
-
-    word1 = random_adjective
-    word2 = random_noun
-
-    nickname = "#{word1}#{separator}#{word2}"
-
-    if add_number
-      number = rand(number_range)
-      nickname << separator unless separator.empty?
-      nickname << number.to_s
-    end
-
-    nickname.downcase.gsub(/\s+/, '')
-  end
-
-  # Генерация ника на основе имени с возможными префиксами/суффиксами
-  def generate_from_name(name, options = {})
-    return generate_random(options) if name.nil? || name.empty?
-
-    base = name.strip
-    separator = options[:separator] || '_'
-    add_prefix = options[:prefix].nil? ? true : options[:prefix]
-    add_suffix = options[:suffix].nil? ? true : options[:suffix]
-    add_number = options[:number].nil? ? false : options[:number]  # по умолчанию без числа
-    number_range = options[:number_range] || 1..999
-
-    nickname = base.gsub(/\s+/, separator)
-
-    nickname = "#{random_prefix}#{separator}#{nickname}" if add_prefix
-    nickname = "#{nickname}#{separator}#{random_suffix}" if add_suffix
-
-    if add_number
-      number = rand(number_range)
-      nickname << separator unless separator.empty?
-      nickname << number.to_s
-    end
-
-    nickname
-  end
-
-  def generate_gamer(name = nil, options = {})
-    if name.nil? || name.empty?
-      base = generate_random(options.merge(number: false))
-    else
-      base = name.strip.gsub(/\s+/, options[:separator] || '_')
-    end
-
-    separator = options[:separator] || '_'
-    add_prefix = options[:prefix].nil? ? true : options[:prefix]
-    add_suffix = options[:suffix].nil? ? true : options[:suffix]
-    apply_leet = options[:leet].nil? ? true : options[:leet]
-    add_number = options[:number].nil? ? true : options[:number]
-    number_range = options[:number_range] || 1..999
-    wrap = options[:wrap_with_x] || false
-
-    nickname = base
-    nickname = leet_transform(nickname) if apply_leet
-
-    if add_prefix
-      prefix = random_prefix
-      prefix = leet_transform(prefix) if apply_leet
-      nickname = "#{prefix}#{separator}#{nickname}"
-    end
-
-    if add_suffix
-      suffix = random_suffix
-      suffix = leet_transform(suffix) if apply_leet
-      nickname = "#{nickname}#{separator}#{suffix}"
-    end
-
-    if add_number
-      number = rand(number_range)
-      nickname << separator unless separator.empty?
-      nickname << number.to_s
-    end
-
-    nickname = "xX_#{nickname}_Xx" if wrap
-
-    nickname
-  end
-  private
+  protected
 
   def random_adjective
-    Faker::Adjective.positive
-  rescue
-    %w[awesome brilliant creative dynamic epic fantastic great happy innovative jolly
-       kind lively magical nice optimistic peaceful quick strong unique vibrant witty
-       xenial young zealous].sample
+    Faker::Adjective.positive.capitalize
   end
 
   def random_noun
-    categories = [
-      -> { Faker::Creature::Animal.name },
-      -> { Faker::Color.color_name },
-      -> { Faker::Food.dish },
-      -> { Faker::Games::Pokemon.name },
-      -> { Faker::Name.first_name }
-    ]
-    categories.sample.call
-  rescue
-    %w[tiger lion panda eagle shark wolf phoenix dragon unicorn thunder shadow blaze
-       storm frost ember].sample
+    Faker::Creature::Animal.name.capitalize
   end
 
   def random_prefix
@@ -166,5 +43,107 @@ class NicknameGenerator
 
   def leet_transform(text)
     text.chars.map { |c| LEET_MAP[c] || c }.join
+  end
+end
+
+# Стратегия: Случайный ник
+class RandomStrategy < GenerationStrategy
+  def generate(options = {})
+    separator = options[:separator] || '_'
+    add_number = options.key?(:number) ? options[:number] : true
+    number_range = options[:number_range] || 1..999
+
+    word1 = random_adjective
+    word2 = random_noun
+
+    nickname = "#{word1}#{separator}#{word2}"
+
+    if add_number
+      nickname << separator unless separator.empty?
+      nickname << rand(number_range).to_s
+    end
+
+    nickname.downcase.gsub(/\s+/, '')
+  end
+end
+# Количество проходов волны
+# Стратегия: Ник из имени
+class FromNameStrategy < GenerationStrategy
+  def generate(options = {})
+    name = options[:name]
+    return RandomStrategy.new.generate(options) if name.nil? || name.empty?
+
+    base = name.strip
+    separator = options[:separator] || '_'
+    add_prefix = options.key?(:prefix) ? options[:prefix] : true
+    add_suffix = options.key?(:suffix) ? options[:suffix] : true
+    add_number = options.key?(:number) ? options[:number] : false
+    number_range = options[:number_range] || 1..999
+
+    nickname = base.gsub(/\s+/, separator)
+    nickname = "#{random_prefix}#{separator}#{nickname}" if add_prefix
+    nickname = "#{nickname}#{separator}#{random_suffix}" if add_suffix
+
+    if add_number
+      nickname << separator unless separator.empty?
+      nickname << rand(number_range).to_s
+    end
+
+    nickname
+  end
+end
+
+# Стратегия: Геймерский ник
+class GamerStrategy < GenerationStrategy
+  def generate(options = {})
+    name = options[:name]
+    separator = options[:separator] || '_'
+    
+    base = if name.nil? || name.empty?
+             RandomStrategy.new.generate(options.merge(number: false))
+           else
+             name.strip.gsub(/\s+/, separator)
+           end
+
+    add_prefix = options.key?(:prefix) ? options[:prefix] : true
+    add_suffix = options.key?(:suffix) ? options[:suffix] : true
+    apply_leet = options.key?(:leet) ? options[:leet] : true
+    add_number = options.key?(:number) ? options[:number] : true
+    number_range = options[:number_range] || 1..999
+    wrap = options[:wrap_with_x] || false
+
+    nickname = base
+    nickname = leet_transform(nickname) if apply_leet
+
+    if add_prefix
+      prefix = apply_leet ? leet_transform(random_prefix) : random_prefix
+      nickname = "#{prefix}#{separator}#{nickname}"
+    end
+
+    if add_suffix
+      suffix = apply_leet ? leet_transform(random_suffix) : random_suffix
+      nickname = "#{nickname}#{separator}#{suffix}"
+    end
+
+    if add_number
+      nickname << separator unless separator.empty?
+      nickname << rand(number_range).to_s
+    end
+
+    nickname = "xX_#{nickname}_Xx" if wrap
+    nickname
+  end
+end
+
+# Контекст, использующий стратегию
+class NicknameGenerator
+  attr_accessor :strategy
+
+  def initialize(strategy = RandomStrategy.new)
+    @strategy = strategy
+  end
+
+  def generate(options = {})
+    @strategy.generate(options)
   end
 end

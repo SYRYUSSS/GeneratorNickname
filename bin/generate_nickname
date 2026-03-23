@@ -1,9 +1,8 @@
 #!/usr/bin/env ruby
 
 require_relative '../lib/nickname_generator'
+require_relative '../lib/animator'
 require 'optparse'
-
-generator = NicknameGenerator.instance
 
 options = {}
 opt_parser = OptionParser.new do |opts|
@@ -41,6 +40,11 @@ opt_parser = OptionParser.new do |opts|
     options[:wrap_with_x] = true
   end
 
+  # Новая опция для анимации
+  opts.on("--anim STYLE", [:typewriter, :wave, :blink, :none], "Animation style: typewriter, wave, blink, none") do |a|
+    options[:animation] = a
+  end
+
   opts.on("-h", "--help", "Prints help") do
     puts opts
     exit
@@ -49,4 +53,19 @@ end
 
 opt_parser.parse!
 
-puts generator.generate(options)
+# Выбор стратегии на основе параметров
+strategy = case options[:type]
+           when :from_name then FromNameStrategy.new
+           when :gamer then GamerStrategy.new
+           else RandomStrategy.new
+           end
+
+# Инициализация контекста со выбранной стратегией
+generator = NicknameGenerator.new(strategy)
+
+# Генерация
+result = generator.generate(options)
+
+# Анимированный вывод (по умолчанию без анимации, если не передано иное)
+animation_style = options[:animation] || :none
+Animator.animate(result, animation_style)
