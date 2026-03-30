@@ -40,9 +40,13 @@ opt_parser = OptionParser.new do |opts|
     options[:wrap_with_x] = true
   end
 
-  # Новая опция для анимации
-  opts.on("--anim STYLE", [:typewriter, :wave, :blink, :none], "Animation style: typewriter, wave, blink, none") do |a|
+  opts.on("--anim STYLE", [:typewriter, :wave, :blink, :fade, :slide, :bounce, :rainbow, :matrix, :none],
+          "Animation style: typewriter, wave, blink, fade, slide, bounce, rainbow, matrix, none") do |a|
     options[:animation] = a
+  end
+
+  opts.on("--delay SECONDS", Float, "Delay between frames in seconds (default 0.05)") do |d|
+    options[:delay] = d
   end
 
   opts.on("-h", "--help", "Prints help") do
@@ -63,9 +67,10 @@ strategy = case options[:type]
 # Инициализация контекста со выбранной стратегией
 generator = NicknameGenerator.new(strategy)
 
-# Генерация
+# Генерация ника
 result = generator.generate(options)
 
-# Анимированный вывод (по умолчанию без анимации, если не передано иное)
+# Анимация (по умолчанию без анимации)
 animation_style = options[:animation] || :none
-Animator.animate(result, animation_style)
+delay = options[:delay] || 0.05
+Animator.animate(result, animation_style, delay)
