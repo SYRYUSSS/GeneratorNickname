@@ -1,2 +1,4 @@
 source 'https://rubygems.org'
 gem 'faker', '~> 3.0'
+gem 'telegram-bot-ruby', '~> 1.0'
+gem 'simplecov', '~> 0.22'
