@@ -1,6 +1,7 @@
 require_relative 'test_helper'
 require_relative '../lib/nickname_generator'
 
+
 class TestNicknameGenerator < Minitest::Test
   def setup
     @generator = NicknameGenerator.new

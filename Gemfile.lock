@@ -4,6 +4,7 @@ GEM
     bigdecimal (4.1.2)
     concurrent-ruby (1.3.6)
     docile (1.4.1)
+    dotenv (3.2.0)
     dry-core (1.2.0)
       concurrent-ruby (~> 1.0)
       logger
@@ -64,6 +65,7 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  dotenv
   faker (~> 3.0)
   simplecov (~> 0.22)
   telegram-bot-ruby (~> 1.0)

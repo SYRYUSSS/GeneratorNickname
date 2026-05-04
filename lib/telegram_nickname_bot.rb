@@ -2,7 +2,9 @@ require 'logger'
 require 'telegram/bot'
 require_relative 'nickname_generator'
 require_relative 'animator'
+require 'dotenv/load'
 
+TOKEN = ENV['TELEGRAM_BOT_TOKEN']
 TELEGRAM_API_PROXY_ENV_KEYS = %w[
   TELEGRAM_HTTP_PROXY HTTPS_PROXY https_proxy HTTP_PROXY http_proxy
 ].freeze
