@@ -254,20 +254,20 @@ class TelegramNicknameBot
 
     unless gif_output_enabled?
       bot.logger.info('/animate: TELEGRAM_GIF=0, text animation')
-      return deliver_animation_text(bot, chat_id, frames)
+      return deliver_animation_text(bot, chat_id, animation_text_frames(style, clipped, frames))
     end
 
     gif_frames = frames_for_gif(style, clipped, frames)
-    deliver_gif(bot, chat_id, gif_frames)
+    deliver_gif(bot, chat_id, gif_frames, style: style, text: clipped)
   end
 
-  def deliver_gif(bot, chat_id, frames)
+  def deliver_gif(bot, chat_id, frames, style: nil, text: nil)
     frames = normalize_gif_frames(frames)
     return 'Нет кадров для GIF.' if frames.empty?
 
     unless GifRenderer.available?
       bot.logger.warn('ImageMagick not available for GIF')
-      deliver_animation_text(bot, chat_id, frames)
+      deliver_animation_text(bot, chat_id, animation_text_frames(style, text, frames))
       return gif_setup_hint
     end
 
@@ -453,6 +453,16 @@ class TelegramNicknameBot
         f.to_s
       end
     end
+  end
+
+  # Текстовый fallback: для rainbow — эмодзи-кадры, не сырой Hash.
+  def animation_text_frames(style, text, frames)
+    return rainbow_frames_for_telegram(text) if style == :rainbow && text && !text.to_s.strip.empty?
+
+    list = Array(frames)
+    return text_frames_from_gif(list) if list.any? { |f| f.is_a?(Hash) && f[:colored] }
+
+    list.map { |f| strip_ansi(f.to_s) }
   end
 
   def clip_animation_text(text)

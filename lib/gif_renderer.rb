@@ -48,9 +48,10 @@ class GifRenderer
       ].join("\n")
     else
       [
-        'Для GIF: sudo apt install imagemagick (или brew install imagemagick)',
+        'Для GIF в Codespaces/Linux:',
+        'sudo apt-get install -y imagemagick',
         'Проверка: magick -version',
-        'В .env: TELEGRAM_GIF=1'
+        'Переменная: TELEGRAM_GIF=1 (export или Codespaces Secrets)'
       ].join("\n")
     end
   end
@@ -141,23 +142,15 @@ class GifRenderer
     s.gsub(/\e\[[0-9;]*m/, '')
   end
 
-  # caption:@file — текст из файла (Tempfile.create сам закрывает файл после блока).
+  # Текст в аргументе caption: (без @file — в Codespaces/Linux policy ImageMagick это блокирует).
   def render_frame_png(text, path, font)
-    Tempfile.create(['gif_label', '.txt']) do |label_file|
-      label_file.write(text)
-      label_file.flush
-      caption_src = "caption:@#{to_magick_path(label_file.path)}"
-      run_frame_convert(caption_src, path, font)
-    end
+    safe = sanitize_frame(text)
+    caption_src = "caption:#{escape_imagemagick_label(safe)}"
+    run_frame_convert(caption_src, path, font)
   rescue MiniMagick::Error
     raise if font.nil? || font.to_s.empty?
 
-    Tempfile.create(['gif_label', '.txt']) do |label_file|
-      label_file.write(text)
-      label_file.flush
-      caption_src = "caption:@#{to_magick_path(label_file.path)}"
-      run_frame_convert(caption_src, path, nil)
-    end
+    run_frame_convert(caption_src, path, nil)
   end
 
   def run_frame_convert(caption_src, path, font)
@@ -201,6 +194,17 @@ class GifRenderer
 
   def escape_draw_text(ch)
     ch.gsub('\\', '\\\\\\\\').gsub("'", "\\\\'")
+  end
+
+  def escape_imagemagick_label(text)
+    text.to_s
+        .gsub('\\', '\\\\')
+        .gsub(':', '\\:')
+        .gsub("'", "\\'")
+        .gsub('%', '%%')
+        .gsub('#', '\\#')
+        .gsub('[', '\\[')
+        .gsub(']', '\\]')
   end
 
   def to_magick_path(path)
