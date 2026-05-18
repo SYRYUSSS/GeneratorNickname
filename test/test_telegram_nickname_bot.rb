@@ -107,4 +107,33 @@ class TestTelegramNicknameBot < Minitest::Test
     error = assert_raises(ArgumentError) { bot.run }
     assert_equal 'TELEGRAM_BOT_TOKEN is required', error.message
   end
+
+  def test_nickname_gif_frames_typewriter
+    frames = @bot.send(:nickname_gif_frames, 'abc')
+    assert_equal %w[a ab abc], frames
+  end
+
+  def test_nick_gif_response_for_random
+    assert @bot.send(:nick_gif_response?, '/random', 'cool_nick')
+    refute @bot.send(:nick_gif_response?, '/random', 'Usage: /from_name <name>')
+    refute @bot.send(:nick_gif_response?, '/help', 'Commands:')
+  end
+
+  def test_gif_output_disabled_via_env
+    ENV['TELEGRAM_GIF'] = '0'
+    refute @bot.send(:gif_output_enabled?)
+  ensure
+    ENV.delete('TELEGRAM_GIF')
+  end
+
+  def test_animation_prepare_rejects_style_with_leading_dash
+    err, = @bot.send(:animation_prepare, %w[-wave Maxim])
+    assert_equal 'Unsupported style: -wave', err
+  end
+
+  def test_rainbow_gif_frames_shift_colors
+    frames = @bot.send(:rainbow_gif_colored_frames, 'ab')
+    assert_equal 6, frames.size
+    refute_equal frames[0][:colored][0][:color], frames[1][:colored][0][:color]
+  end
 end

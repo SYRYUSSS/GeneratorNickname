@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+# Локальная проверка GIF: bundle exec ruby bin/test_gif
+
+require 'bundler/setup'
+require_relative '../lib/gif_renderer'
+
+puts "ImageMagick + GIF: #{GifRenderer.available? ? 'OK' : 'НЕТ'}"
+unless GifRenderer.available?
+  puts GifRenderer.install_hint
+  exit 1
+end
+
+renderer = GifRenderer.new
+path = renderer.build(%w[He Hel Hell Hello], delay_cs: 8)
+size = File.size(path)
+puts "typewriter: #{path} (#{size} байт)"
+
+rainbow_frames = 6.times.map do |offset|
+  colored = 'Hi'.chars.map.with_index do |ch, idx|
+    colors = %w[#E53935 #FB8C00 #FDD835 #43A047 #1E88E5 #8E24AA]
+    { char: ch, color: colors[(idx + offset) % colors.size] }
+  end
+  { colored: colored }
+end
+path2 = renderer.build(rainbow_frames, delay_cs: 12)
+puts "rainbow: #{path2} (#{File.size(path2)} байт)"
+puts 'Откройте GIF в проводнике — у rainbow буквы должны менять цвет.'

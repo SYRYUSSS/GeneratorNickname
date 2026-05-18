@@ -1,7 +1,10 @@
 require 'logger'
+require 'fileutils'
+require 'timeout'
 require 'telegram/bot'
 require_relative 'nickname_generator'
 require_relative 'animator'
+require_relative 'gif_renderer'
 require 'dotenv/load'
 
 TOKEN = ENV['TELEGRAM_BOT_TOKEN']
@@ -93,6 +96,10 @@ class TelegramNicknameBot
   # Rainbow: эмодзи на символ — лимит исходника, чтобы не пробить лимит Telegram.
   MAX_RAINBOW_SOURCE_CHARS = 56
   DEFAULT_ANIM_DELAY_SEC = 0.09
+  DEFAULT_GIF_DELAY_CS = 9
+  GIF_BUILD_TIMEOUT_SEC = 45
+  RAINBOW_GIF_COLORS = %w[#E53935 #FB8C00 #FDD835 #43A047 #1E88E5 #8E24AA].freeze
+  NICK_COMMANDS = %w[/random /from_name /gamer].freeze
 
   def initialize(token: ENV['TELEGRAM_BOT_TOKEN'], generator_factory: NicknameGenerator)
     @token = token
@@ -146,7 +153,12 @@ class TelegramNicknameBot
           end
 
           response = handle_message(text)
-          bot.api.send_message(chat_id: message.chat.id, text: response)
+          if gif_output_enabled? && nick_gif_response?(command, response)
+            err = deliver_gif(bot, message.chat.id, nickname_gif_frames(response))
+            bot.api.send_message(chat_id: message.chat.id, text: err) if err
+          else
+            bot.api.send_message(chat_id: message.chat.id, text: response)
+          end
         rescue StandardError => e
           bot.logger.error("#{e.class}: #{e.message}\n#{e.backtrace&.join("\n")}")
           begin
@@ -229,34 +241,93 @@ class TelegramNicknameBot
     ['Неизвестный стиль анимации.', nil, nil, nil, nil]
   end
 
-  # Живая анимация: первое сообщение + edit_message_text по кадрам (как перерисовка в CLI).
+  # TELEGRAM_GIF=0 → текст в одном сообщении; иначе GIF (если есть ImageMagick).
   def deliver_animation(bot, chat_id, args)
     error, frames, style, clipped, = animation_prepare(args)
     return error if error
 
-    delay = Float(ENV.fetch('TELEGRAM_ANIM_DELAY', DEFAULT_ANIM_DELAY_SEC))
-
     if frames.nil? || frames.empty?
-      msg = clipped.to_s
-      resp = bot.api.send_message(
-        chat_id: chat_id,
-        text: truncate_for_telegram(msg)
-      )
-      return nil if resp.is_a?(Hash) && resp['ok']
-
-      return api_error_hint(resp)
+      frames = [clipped.to_s]
     end
 
     frames = frames.take(MAX_TELEGRAM_ANIM_FRAMES)
 
+    unless gif_output_enabled?
+      bot.logger.info('/animate: TELEGRAM_GIF=0, text animation')
+      return deliver_animation_text(bot, chat_id, frames)
+    end
+
+    gif_frames = frames_for_gif(style, clipped, frames)
+    deliver_gif(bot, chat_id, gif_frames)
+  end
+
+  def deliver_gif(bot, chat_id, frames)
+    frames = normalize_gif_frames(frames)
+    return 'Нет кадров для GIF.' if frames.empty?
+
+    unless GifRenderer.available?
+      bot.logger.warn('ImageMagick not available for GIF')
+      deliver_animation_text(bot, chat_id, frames)
+      return gif_setup_hint
+    end
+
+    delay_cs = Integer(ENV.fetch('TELEGRAM_GIF_DELAY_CS', DEFAULT_GIF_DELAY_CS))
+    renderer = GifRenderer.new
+    gif_path = Timeout.timeout(GIF_BUILD_TIMEOUT_SEC) do
+      renderer.build(frames, delay_cs: delay_cs)
+    end
+
+    upload = Faraday::UploadIO.new(gif_path, 'image/gif')
+    resp = Timeout.timeout(GIF_BUILD_TIMEOUT_SEC) do
+      bot.api.send_animation(chat_id: chat_id, animation: upload)
+    end
+    return nil if resp.is_a?(Hash) && resp['ok']
+
+    retry_after = telegram_retry_after(resp)
+    if retry_after
+      bot.logger.warn("send_animation rate limited: #{retry_after}s")
+      return rate_limit_message(retry_after)
+    end
+
+    hint = api_error_hint(resp)
+    bot.logger.warn("send_animation failed: #{hint}")
+    deliver_animation_text(bot, chat_id, text_frames_from_gif(frames))
+    "GIF не отправился (#{hint}). Показана текстовая анимация."
+  rescue Timeout::Error
+    bot.logger.warn('GIF build/send timed out')
+    deliver_animation_text(bot, chat_id, text_frames_from_gif(frames))
+    'GIF: таймаут. Показана текстовая анимация.'
+  rescue MiniMagick::Error, Errno::ENOENT, Faraday::TimeoutError, Faraday::ConnectionFailed => e
+    bot.logger.error("GIF failed: #{e.class}: #{e.message}")
+    return rate_limit_message(parse_retry_after(e.message)) if rate_limited_message?(e.message)
+
+    deliver_animation_text(bot, chat_id, text_frames_from_gif(frames))
+    "GIF: #{e.message}\nПоказана текстовая анимация."
+  rescue StandardError => e
+    bot.logger.error("GIF unexpected error: #{e.class}: #{e.message}")
+    return rate_limit_message(parse_retry_after(e.message)) if rate_limited_message?(e.message)
+
+    deliver_animation_text(bot, chat_id, text_frames_from_gif(frames))
+    "GIF: #{e.message}\nПоказана текстовая анимация."
+  ensure
+    cleanup_gif_workdir(gif_path) if defined?(gif_path) && gif_path
+  end
+
+  def gif_setup_hint
+    [
+      'GIF недоступен на этом ПК.',
+      GifRenderer.install_hint,
+      'Сейчас отправлена текстовая анимация (сообщение меняется по кадрам).'
+    ].join("\n")
+  end
+
+  # Запасной режим без ImageMagick: одно сообщение + edit_message_text.
+  def deliver_animation_text(bot, chat_id, frames)
+    delay = Float(ENV.fetch('TELEGRAM_ANIM_DELAY', DEFAULT_ANIM_DELAY_SEC))
     slides = frames.map { |frame| truncate_for_telegram(frame.to_s) }
 
     first = slides.first.to_s
-
-    resp = bot.api.send_message(
-      chat_id: chat_id,
-      text: first
-    )
+    resp = bot.api.send_message(chat_id: chat_id, text: first)
     return api_error_hint(resp) unless resp.is_a?(Hash) && resp['ok']
 
     mid = resp.dig('result', 'message_id')
@@ -269,12 +340,44 @@ class TelegramNicknameBot
         message_id: mid,
         text: slide
       )
-      bot.logger.warn("edit_message_text: #{edit.inspect}") unless edit.is_a?(Hash) && edit['ok']
+      unless edit.is_a?(Hash) && edit['ok']
+        retry_after = telegram_retry_after(edit)
+        if retry_after
+          bot.logger.warn("edit_message_text rate limited: #{retry_after}s")
+          return rate_limit_message(retry_after)
+        end
+        bot.logger.warn("edit_message_text: #{edit.inspect}")
+      end
     rescue StandardError => e
       bot.logger.warn("edit_message_text failed: #{e.class}: #{e.message}")
+      return rate_limit_message(parse_retry_after(e.message)) if rate_limited_message?(e.message)
+
       break
     end
 
+    nil
+  end
+
+  def gif_output_enabled?
+    ENV.fetch('TELEGRAM_GIF', '1') != '0'
+  end
+
+  def nick_gif_response?(command, response)
+    return false unless NICK_COMMANDS.include?(command)
+    return false if response.to_s.start_with?('Usage:')
+
+    true
+  end
+
+  def nickname_gif_frames(nickname)
+    clipped = clip_animation_text(nickname.to_s)
+    telegram_animation_frames(:typewriter, clipped).map { |line| strip_ansi(line.to_s) }
+  end
+
+  def cleanup_gif_workdir(gif_path)
+    dir = File.dirname(gif_path)
+    FileUtils.rm_rf(dir) if dir && File.directory?(dir)
+  rescue StandardError
     nil
   end
 
@@ -293,6 +396,63 @@ class TelegramNicknameBot
 
     desc = resp['description'] || resp.dig('parameters', 'retry_after')
     desc ? "Telegram: #{desc}" : 'Не удалось отправить сообщение.'
+  end
+
+  def telegram_retry_after(resp)
+    return nil unless resp.is_a?(Hash) && resp['error_code'] == 429
+
+    params = resp['parameters']
+    params = JSON.parse(params) if params.is_a?(String)
+    (params && (params['retry_after'] || params[:retry_after])) || 60
+  end
+
+  def rate_limit_message(seconds)
+    sec = seconds.to_i
+    sec = 30 if sec <= 0
+    "Слишком много запросов к Telegram. Подождите #{sec} сек и попробуйте снова."
+  end
+
+  def rate_limited_message?(message)
+    msg = message.to_s
+    msg.include?('429') || msg.include?('Too Many Requests') || msg.include?('retry after')
+  end
+
+  def parse_retry_after(message)
+    m = message.to_s.match(/retry after (\d+)/i)
+    m ? m[1].to_i : 60
+  end
+
+  def frames_for_gif(style, text, default_frames)
+    return rainbow_gif_colored_frames(text) if style == :rainbow
+
+    default_frames
+  end
+
+  def rainbow_gif_colored_frames(text)
+    RAINBOW_GIF_COLORS.size.times.map do |offset|
+      colored = text.chars.map.with_index do |ch, idx|
+        { char: ch, color: RAINBOW_GIF_COLORS[(idx + offset) % RAINBOW_GIF_COLORS.size] }
+      end
+      { colored: colored }
+    end
+  end
+
+  def normalize_gif_frames(frames)
+    Array(frames).reject(&:nil?).map do |f|
+      next f if f.is_a?(Hash) && f[:colored]
+
+      strip_ansi(f.to_s)
+    end
+  end
+
+  def text_frames_from_gif(frames)
+    normalize_gif_frames(frames).map do |f|
+      if f.is_a?(Hash) && f[:colored]
+        f[:colored].map { |s| s[:char] || s['char'] }.join
+      else
+        f.to_s
+      end
+    end
   end
 
   def clip_animation_text(text)
@@ -344,7 +504,7 @@ class TelegramNicknameBot
     end
   end
 
-  # Радуга как раньше: полоса эмодзи «перетекает» по символам (ANSI в Telegram не видны).
+  # Текстовый режим (TELEGRAM_GIF=0): эмодзи-радуга в чате.
   def rainbow_frames_for_telegram(text)
     palette = %w[🔴 🟠 🟡 🟢 🔵 🟣]
     palette.size.times.map do |offset|
@@ -383,7 +543,8 @@ class TelegramNicknameBot
       '/random - generate random nickname',
       '/from_name <name> - generate nickname from your name',
       '/gamer <name?> - generate gamer nickname, name is optional',
-      '/animate <style> <text> — одно сообщение, текст меняется по кадрам',
+      '/animate <style> <text> — example: /animate wave Maxim',
+      'GIF: TELEGRAM_GIF=1 + ImageMagick (magick). TELEGRAM_GIF=0 = only text animation',
       "Available styles: #{SUPPORTED_ANIMATIONS.join(', ')}"
     ].join("\n")
   end
